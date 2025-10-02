@@ -1,0 +1,189 @@
+module main(
+input clk,
+input reset, // FPGA clock signal, 100 MHz
+input btnL, btnR, // FPGA IO pushbuttons
+output [6:0] IO_SSEG, output [3:0] IO_SSEG_SEL, // FPGA 7-Segment Display
+output reg [1:0] IO_LED //LED 0 is AM/PM LED
+);
+/* Timing parameters */
+reg [31:0] counter = 0;
+parameter max_counter = 1666667; //100000000 / 60 = 1666667 for minutes moving as fast as a second
+//parameter max_counter = 100000000; // 100 MHz / 100000000 = 1 Hz => 1 second per second
+reg [31:0] twoSecCounter = 0; // = 0.2 Hz or 5 seconds
+parameter tsMaxCount = 200000000;
+reg [31:0] fiveSecCounter = 0; // = 0.2 Hz or 5 seconds
+parameter fsMaxCount = 500000000;
+reg [31:0] threeSecCounter = 0; // = 0.2 Hz or 5 seconds
+parameter threeMaxCount = 300000000;
+/* Data registers */
+reg [5:0] Hours, Minutes;
+reg [3:0] Digit_0,Digit_1, Digit_2, Digit_3 = 0;
+reg [0:0] current_bit = 0; // Currently only minutes and hours
+reg initializeHouse = 0;
+wire [31:0] lfsrOutput;
+reg [31:0] tempValue;
+reg [3:0] randomValue;
+reg standVal = 0;
+reg [4:0] houseWins = 0;
+reg [4:0] playerWins = 0;
+reg winState = 0;
+reg [1:0] gameFinished = 0;
+reg onceVar = 0;
+reg AM_PM = 0; // AM = 0/off , PM = 1/on
+/* Seven Segment Display */
+sevseg display(.clk(clk), // Initialize 7-segment display module
+.binary_input_0(Digit_0),
+.binary_input_1(Digit_1),
+.binary_input_2(Digit_2),
+.binary_input_3(Digit_3),
+.IO_SSEG_SEL(IO_SSEG_SEL),
+.IO_SSEG(IO_SSEG));
+//LFSR Random Number Gen
+LFSR randomGen(.clk(clk),
+.q(lfsrOutput));
+//in theory should just be clocking with the device
+always @(posedge clk) begin
+if (reset == 1) begin //reset values if switch 15 enabled
+counter <= 0;
+Seconds <= 0;
+Minutes <= 0;
+Hours <= 0;
+initializeHouse <= 0;
+standVal <= 0;
+onceVar <= 0;
+houseWins <= 0;
+playerWins <= 0;
+end
+else begin
+if (initializeHouse == 0) begin
+initializeHouse <= 1;
+tempValue <= lfsrOutput;
+randomValue <= tempValue %10;
+if (randomValue ==0)
+Hours <= Hours +10;
+else
+Hours <= Hours + randomValue ;
+end
+if (winState == 0) begin
+IO_LED[1] <= 0;
+if (counter < (25000000)) begin // different clock speed when setting - 4 Hz
+counter <= counter + 1;
+end else begin
+counter <= 0;
+if (btnR) begin // Increment minutes when you push
+//Minutes <= Minutes + 1;
+tempValue <= lfsrOutput;
+randomValue <= tempValue %10;
+if (randomValue ==0)
+Minutes <= Minutes +10;
+else
+Minutes <= Minutes + randomValue ;
+end
+if (btnL) begin //increment hours
+standVal <= 1;
+winState <= 1;
+end
+end
+end// end Set_Clock
+end
+if (standVal == 1) begin
+if (twoSecCounter < (tsMaxCount)) begin // different clock speed when setting - 4 Hz
+twoSecCounter <= twoSecCounter + 1;
+end else begin
+twoSecCounter <= 0;
+tempValue <= lfsrOutput; // every two seconds it will add a value to house total
+randomValue <= tempValue %10;
+if (randomValue == 0)
+Hours <= Hours +10;
+else
+Hours <= Hours + randomValue ;
+end
+end
+//CHECK FOR PLAYER WIN ON HITS
+if (onceVar == 0)begin
+if (Minutes > 21) begin
+houseWins <= houseWins +1;
+gameFinished <= 1;
+winState <=1;
+onceVar <= 1;
+end
+if (Minutes == 21) begin
+playerWins <= playerWins +1;
+gameFinished <= 1;
+winState <=1;
+onceVar <=1;
+end
+end
+//CHECK FOR PLAYER WIN/LOSS ON HITS END
+if (standVal == 1) begin //check for win/lose/draw on stand
+if (Hours > 21) begin //house goes over 21
+playerWins <= playerWins +1;
+standVal <= 0;
+gameFinished <= 1;
+winState <= 1;
+end
+if (Hours > 16 && Hours < 21) begin //check for draw/house stands on 17
+standVal <= 0;
+if (Hours > Minutes) begin //CHECKS IF HOUSE WINS
+houseWins <= houseWins +1;
+gameFinished <= 1;
+winState <= 1;
+end
+else if (Hours < Minutes) begin//Player wins
+playerWins <= playerWins +1;
+gameFinished <= 1;
+winState <= 1;
+end
+else begin //draw
+gameFinished <= 1;
+winState <= 1;
+end
+end
+if (Hours == 21) begin //house gets blackjack
+houseWins <= houseWins +1;
+standVal <= 0;
+gameFinished <= 1;
+winState <= 1;
+end
+end
+if (gameFinished == 1) begin //to flash end score make gamefinished be another if statement and it adds another
+variavble for this
+Digit_0 <= Minutes %10;
+Digit_1 <= Minutes /10;
+Digit_2 <= Hours %10;
+Digit_3 <= Hours /10;
+if (threeSecCounter < (threeMaxCount)) begin // different clock speed when setting - 4 Hz
+threeSecCounter <= threeSecCounter + 1;
+end else begin
+threeSecCounter <= 0;
+gameFinished <= 2;
+end
+end
+if (gameFinished == 2) begin
+Digit_0 <= playerWins %10;
+Digit_1 <= playerWins /10;
+Digit_2 <= houseWins %10;
+Digit_3 <= houseWins /10;
+if (fiveSecCounter < (fsMaxCount)) begin // different clock speed when setting - 4 Hz
+fiveSecCounter <= fiveSecCounter + 1;
+end else begin
+fiveSecCounter <= 0; //GAME IS RESET FOR NEW MATCH
+gameFinished <=0;
+winState <= 0;
+Minutes <= 0;
+Hours <= 0;
+initializeHouse <= 0;
+standVal <= 0;
+onceVar <=0;
+end
+end
+if (gameFinished == 0) begin
+begin
+Digit_0 <= Minutes % 10; // 1's of minutes
+Digit_1 <= Minutes / 10; // 10's of minutes
+Digit_2 <= Hours % 10;
+Digit_3 <= Hours / 10;
+end // end Clock Display
+end
+end //end always @(posedge clk)
+endmodule
